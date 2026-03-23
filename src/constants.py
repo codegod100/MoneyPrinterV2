@@ -30,6 +30,7 @@ TWITTER_CRON_OPTIONS = [
 YOUTUBE_OPTIONS = [
     "Upload Short",
     "Show all Shorts",
+    "Recover Last Video",
     "Setup CRON Job",
     "Quit"
 ]

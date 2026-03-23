@@ -5,6 +5,7 @@ import time
 import os
 import requests
 import assemblyai as aai
+from PIL import Image as PILImage
 
 from utils import *
 from cache import *
@@ -17,7 +18,6 @@ from constants import *
 from typing import List
 from moviepy.editor import *
 from termcolor import colored
-from selenium_firefox import *
 from selenium import webdriver
 from moviepy.video.fx.all import crop
 from moviepy.config import change_settings
@@ -27,6 +27,9 @@ from selenium.webdriver.firefox.options import Options
 from moviepy.video.tools.subtitles import SubtitlesClip
 from webdriver_manager.firefox import GeckoDriverManager
 from datetime import datetime
+
+if not hasattr(PILImage, "ANTIALIAS") and hasattr(PILImage, "Resampling"):
+    PILImage.ANTIALIAS = PILImage.Resampling.LANCZOS
 
 # Set ImageMagick Path
 change_settings({"IMAGEMAGICK_BINARY": get_imagemagick_path()})
@@ -220,6 +223,63 @@ class YouTube:
         self.metadata = {"title": title, "description": description}
 
         return self.metadata
+
+    def _lookup_music_attribution(self, song_path: str) -> str:
+        """
+        Looks up attribution text for the selected song from Songs/ATTRIBUTION.txt.
+
+        Args:
+            song_path (str): Absolute path to the selected song
+
+        Returns:
+            attribution (str): Attribution block or empty string if not found
+        """
+        attribution_path = os.path.join(ROOT_DIR, "Songs", "ATTRIBUTION.txt")
+        if not os.path.exists(attribution_path):
+            return ""
+
+        song_name = os.path.basename(song_path)
+        song_stem = os.path.splitext(song_name)[0].strip().lower()
+
+        with open(attribution_path, "r", encoding="utf-8") as file:
+            content = file.read().strip()
+
+        blocks = [block.strip() for block in content.split("\n\n") if block.strip()]
+        for block in blocks:
+            lines = block.splitlines()
+            if not lines:
+                continue
+            title = lines[0].strip().lower()
+            if title == song_stem or song_stem.startswith(title):
+                return block
+
+        return ""
+
+    def _append_music_attribution(self) -> None:
+        """
+        Appends the selected music attribution to the generated description.
+
+        Returns:
+            None
+        """
+        song_path = getattr(self, "background_song_path", "")
+        if not song_path or not getattr(self, "metadata", None):
+            return
+
+        attribution = self._lookup_music_attribution(song_path)
+        if not attribution:
+            return
+
+        description = str(self.metadata.get("description", "")).strip()
+        if attribution in description:
+            return
+
+        if description:
+            description = f"{description}\n\nMusic Attribution\n{attribution}"
+        else:
+            description = f"Music Attribution\n{attribution}"
+
+        self.metadata["description"] = description
 
     def generate_prompts(self) -> List[str]:
         """
@@ -618,6 +678,8 @@ class YouTube:
         final_clip = concatenate_videoclips(clips)
         final_clip = final_clip.set_fps(30)
         random_song = choose_random_song()
+        self.background_song_path = random_song
+        self._append_music_attribution()
 
         subtitles = None
         try:
@@ -656,26 +718,26 @@ class YouTube:
         Returns:
             path (str): The path to the generated MP4 File.
         """
-        # Generate the Topic
+        info(" => Generating topic...")
         self.generate_topic()
 
-        # Generate the Script
+        info(" => Generating script...")
         self.generate_script()
 
-        # Generate the Metadata
+        info(" => Generating metadata...")
         self.generate_metadata()
 
-        # Generate the Image Prompts
+        info(" => Generating image prompts...")
         self.generate_prompts()
 
-        # Generate the Images
+        info(" => Generating images...")
         for prompt in self.image_prompts:
             self.generate_image(prompt)
 
-        # Generate the TTS
+        info(" => Generating voiceover...")
         self.generate_script_to_speech(tts_instance)
 
-        # Combine everything
+        info(" => Combining video...")
         path = self.combine()
 
         if get_verbose():

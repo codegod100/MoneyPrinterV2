@@ -7,6 +7,18 @@ from termcolor import colored
 
 ROOT_DIR = os.path.dirname(sys.path[0])
 
+def _get_env_secret(name: str) -> str:
+    value = os.environ.get(name, "")
+    if value:
+        return value
+
+    file_path = os.environ.get(f"{name}_FILE", "")
+    if file_path and os.path.exists(file_path):
+        with open(file_path, "r", encoding="utf-8") as file:
+            return file.read().strip()
+
+    return ""
+
 def assert_folder_structure() -> None:
     """
     Make sure that the nessecary folder structure is present.
@@ -79,6 +91,16 @@ def get_ollama_base_url() -> str:
     with open(os.path.join(ROOT_DIR, "config.json"), "r") as file:
         return json.load(file).get("ollama_base_url", "http://127.0.0.1:11434")
 
+def get_llm_provider() -> str:
+    """
+    Gets the configured LLM provider.
+
+    Returns:
+        provider (str): The LLM provider
+    """
+    with open(os.path.join(ROOT_DIR, "config.json"), "r") as file:
+        return json.load(file).get("llm_provider", "local_ollama")
+
 def get_ollama_model() -> str:
     """
     Gets the Ollama model name from the config file.
@@ -88,6 +110,37 @@ def get_ollama_model() -> str:
     """
     with open(os.path.join(ROOT_DIR, "config.json"), "r") as file:
         return json.load(file).get("ollama_model", "")
+
+def get_zai_api_base_url() -> str:
+    """
+    Gets the Z.ai API base URL.
+
+    Returns:
+        url (str): The Z.ai API base URL
+    """
+    with open(os.path.join(ROOT_DIR, "config.json"), "r") as file:
+        return json.load(file).get("zai_api_base_url", "https://api.z.ai/api/paas/v4")
+
+def get_zai_model() -> str:
+    """
+    Gets the Z.ai model name.
+
+    Returns:
+        model (str): The Z.ai model name
+    """
+    with open(os.path.join(ROOT_DIR, "config.json"), "r") as file:
+        return json.load(file).get("zai_model", "glm-4.7")
+
+def get_zai_api_key() -> str:
+    """
+    Gets the Z.ai API key.
+
+    Returns:
+        key (str): The Z.ai API key
+    """
+    with open(os.path.join(ROOT_DIR, "config.json"), "r") as file:
+        configured = json.load(file).get("zai_api_key", "")
+        return configured or _get_env_secret("ZAI_API_KEY")
 
 def get_twitter_language() -> str:
     """
@@ -241,7 +294,8 @@ def get_assemblyai_api_key() -> str:
         key (str): The AssemblyAI API key
     """
     with open(os.path.join(ROOT_DIR, "config.json"), "r") as file:
-        return json.load(file)["assembly_ai_api_key"]
+        configured = json.load(file).get("assembly_ai_api_key", "")
+        return configured or _get_env_secret("ASSEMBLYAI_API_KEY")
 
 def get_stt_provider() -> str:
     """

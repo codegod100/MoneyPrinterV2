@@ -11,6 +11,19 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH = os.path.join(ROOT_DIR, "config.json")
 
 
+def get_env_secret(name: str) -> str:
+    value = os.environ.get(name, "")
+    if value:
+        return value
+
+    file_path = os.environ.get(f"{name}_FILE", "")
+    if file_path and os.path.exists(file_path):
+        with open(file_path, "r", encoding="utf-8") as file:
+            return file.read().strip()
+
+    return ""
+
+
 def ok(msg: str) -> None:
     print(f"[OK] {msg}")
 
@@ -41,8 +54,10 @@ def main() -> int:
 
     failures = 0
 
+    llm_provider = str(cfg.get("llm_provider", "local_ollama")).lower()
     stt_provider = str(cfg.get("stt_provider", "local_whisper")).lower()
 
+    ok(f"llm_provider={llm_provider}")
     ok(f"stt_provider={stt_provider}")
 
     imagemagick_path = cfg.get("imagemagick_path", "")
@@ -63,23 +78,41 @@ def main() -> int:
     else:
         warn("firefox_profile is empty. Twitter/YouTube automation requires this.")
 
-    # Ollama (LLM)
-    base = str(cfg.get("ollama_base_url", "http://127.0.0.1:11434")).rstrip("/")
-    reachable, detail = check_url(f"{base}/api/tags")
-    if not reachable:
-        fail(f"Ollama is not reachable at {base}: {detail}")
-        failures += 1
+    if llm_provider == "zai_glm":
+        zai_key = cfg.get("zai_api_key", "") or get_env_secret("ZAI_API_KEY")
+        zai_base = str(cfg.get("zai_api_base_url", "https://api.z.ai/api/paas/v4")).rstrip("/")
+        zai_model = str(cfg.get("zai_model", "glm-4.7")).strip() or "glm-4.7"
+
+        if zai_key:
+            ok("zai_api_key is set")
+        else:
+            fail("zai_api_key is empty (and ZAI_API_KEY / ZAI_API_KEY_FILE are not set)")
+            failures += 1
+
+        ok(f"Z.ai model configured: {zai_model}")
+        reachable, detail = check_url(zai_base, timeout=8)
+        if not reachable:
+            warn(f"Z.ai base URL could not be reached: {detail}")
+        else:
+            ok(f"Z.ai base URL reachable: {zai_base}")
     else:
-        ok(f"Ollama reachable at {base}")
-        try:
-            tags = requests.get(f"{base}/api/tags", timeout=5).json()
-            models = [m.get("name") for m in tags.get("models", [])]
-            if models:
-                ok(f"Ollama models available: {', '.join(models[:10])}")
-            else:
-                warn("No models found on Ollama. Pull a model first (e.g. 'ollama pull llama3.2:3b').")
-        except Exception as exc:
-            warn(f"Could not validate Ollama model list: {exc}")
+        # Ollama (LLM)
+        base = str(cfg.get("ollama_base_url", "http://127.0.0.1:11434")).rstrip("/")
+        reachable, detail = check_url(f"{base}/api/tags")
+        if not reachable:
+            fail(f"Ollama is not reachable at {base}: {detail}")
+            failures += 1
+        else:
+            ok(f"Ollama reachable at {base}")
+            try:
+                tags = requests.get(f"{base}/api/tags", timeout=5).json()
+                models = [m.get("name") for m in tags.get("models", [])]
+                if models:
+                    ok(f"Ollama models available: {', '.join(models[:10])}")
+                else:
+                    warn("No models found on Ollama. Pull a model first (e.g. 'ollama pull llama3.2:3b').")
+            except Exception as exc:
+                warn(f"Could not validate Ollama model list: {exc}")
 
     # Nano Banana 2 (image generation)
     api_key = cfg.get("nanobanana2_api_key", "") or os.environ.get("GEMINI_API_KEY", "")
@@ -108,6 +141,13 @@ def main() -> int:
             ok("faster-whisper is installed")
         except Exception as exc:
             fail(f"faster-whisper is not importable: {exc}")
+            failures += 1
+    elif stt_provider == "third_party_assemblyai":
+        assembly_key = cfg.get("assembly_ai_api_key", "") or get_env_secret("ASSEMBLYAI_API_KEY")
+        if assembly_key:
+            ok("assembly_ai_api_key is set")
+        else:
+            fail("assembly_ai_api_key is empty (and ASSEMBLYAI_API_KEY / ASSEMBLYAI_API_KEY_FILE are not set)")
             failures += 1
 
     if failures:

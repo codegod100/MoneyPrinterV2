@@ -16,6 +16,7 @@ from prettytable import PrettyTable
 from classes.Outreach import Outreach
 from classes.AFM import AffiliateMarketing
 from llm_provider import list_models, select_model, get_active_model
+from recovery import recover_last_video
 
 def main():
     """Main entry point for the application, providing a menu-driven interface
@@ -78,7 +79,13 @@ def main():
 
                 success(f" => Generated ID: {generated_uuid}")
                 nickname = question(" => Enter a nickname for this account: ")
-                fp_profile = question(" => Enter the path to the Firefox profile: ")
+                fp_profile = str(get_firefox_profile_path()).strip()
+                if not fp_profile:
+                    error(
+                        "No Firefox profile is configured. Enter the dev shell with nix develop so the flake can seed config.json.",
+                        "red",
+                    )
+                    return
                 niche = question(" => Enter the account niche: ")
                 language = question(" => Enter the account language: ")
 
@@ -138,16 +145,45 @@ def main():
                 error("Invalid account selected. Please try again.", "red")
                 main()
             else:
+                firefox_profile = str(selected_account.get("firefox_profile", "")).strip()
+                if not firefox_profile:
+                    firefox_profile = str(get_firefox_profile_path()).strip()
+                niche = str(selected_account.get("niche", "")).strip()
+                language = str(selected_account.get("language", "")).strip()
+
+                if not firefox_profile:
+                    error(
+                        "Selected YouTube account has no Firefox profile configured. "
+                        "Delete and recreate the account with a valid Firefox profile path.",
+                        "red",
+                    )
+                    return
+
+                if not niche:
+                    error(
+                        "Selected YouTube account has no niche configured. "
+                        "Delete and recreate the account with a niche.",
+                        "red",
+                    )
+                    return
+
+                if not language:
+                    error(
+                        "Selected YouTube account has no language configured. "
+                        "Delete and recreate the account with a language.",
+                        "red",
+                    )
+                    return
+
                 youtube = YouTube(
                     selected_account["id"],
                     selected_account["nickname"],
-                    selected_account["firefox_profile"],
-                    selected_account["niche"],
-                    selected_account["language"]
+                    firefox_profile,
+                    niche,
+                    language
                 )
 
                 while True:
-                    rem_temp_files()
                     info("\n============ OPTIONS ============", False)
 
                     for idx, youtube_option in enumerate(YOUTUBE_OPTIONS):
@@ -160,6 +196,7 @@ def main():
                     tts = TTS()
 
                     if user_input == 1:
+                        rem_temp_files()
                         youtube.generate_video(tts)
                         upload_to_yt = question("Do you want to upload this video to YouTube? (Yes/No): ")
                         if upload_to_yt.lower() == "yes":
@@ -182,6 +219,21 @@ def main():
                         else:
                             warning(" No videos found.")
                     elif user_input == 3:
+                        try:
+                            recovered = recover_last_video(return_details=True)
+                            recovered_path = recovered["output"]
+                            youtube.add_video(
+                                {
+                                    "title": f"Recovered Draft {os.path.basename(recovered_path)}",
+                                    "description": f"Recovered from {os.path.basename(recovered['wav'])} using {recovered['images']} image(s).",
+                                    "url": recovered_path,
+                                    "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                }
+                            )
+                            success(f"Recovered last video: {recovered_path}")
+                        except Exception as exc:
+                            error(f"Failed to recover last video: {exc}", "red")
+                    elif user_input == 4:
                         info("How often do you want to upload?")
 
                         info("\n============ OPTIONS ============", False)
@@ -209,7 +261,7 @@ def main():
                             success("Set up CRON Job.")
                         else:
                             break
-                    elif user_input == 4:
+                    elif user_input == 5:
                         if get_verbose():
                             info(" => Climbing Options Ladder...", False)
                         break
@@ -227,7 +279,13 @@ def main():
 
                 success(f" => Generated ID: {generated_uuid}")
                 nickname = question(" => Enter a nickname for this account: ")
-                fp_profile = question(" => Enter the path to the Firefox profile: ")
+                fp_profile = str(get_firefox_profile_path()).strip()
+                if not fp_profile:
+                    error(
+                        "No Firefox profile is configured. Enter the dev shell with nix develop so the flake can seed config.json.",
+                        "red",
+                    )
+                    return
                 topic = question(" => Enter the account topic: ")
 
                 add_account("twitter", {
@@ -444,41 +502,48 @@ if __name__ == "__main__":
     # Fetch MP3 Files
     fetch_songs()
 
-    # Select Ollama model — use config value if set, otherwise pick interactively
-    configured_model = get_ollama_model()
-    if configured_model:
+    llm_provider = str(get_llm_provider() or "local_ollama").lower()
+    configured_model = ""
+
+    if llm_provider == "zai_glm":
+        configured_model = str(get_zai_model() or "glm-4.7").strip() or "glm-4.7"
         select_model(configured_model)
-        success(f"Using configured model: {configured_model}")
+        success(f"Using configured Z.ai model: {configured_model}")
     else:
-        try:
-            models = list_models()
-        except Exception as e:
-            error(f"Could not connect to Ollama: {e}")
-            sys.exit(1)
-
-        if not models:
-            error("No models found on Ollama. Pull a model first (e.g. 'ollama pull llama3.2:3b').")
-            sys.exit(1)
-
-        info("\n========== OLLAMA MODELS =========", False)
-        for idx, model_name in enumerate(models):
-            print(colored(f" {idx + 1}. {model_name}", "cyan"))
-        info("==================================\n", False)
-
-        model_choice = None
-        while model_choice is None:
-            raw = input(colored("Select a model: ", "magenta")).strip()
+        configured_model = get_ollama_model()
+        if configured_model:
+            select_model(configured_model)
+            success(f"Using configured model: {configured_model}")
+        else:
             try:
-                choice_idx = int(raw) - 1
-                if 0 <= choice_idx < len(models):
-                    model_choice = models[choice_idx]
-                else:
-                    warning("Invalid selection. Try again.")
-            except ValueError:
-                warning("Please enter a number.")
+                models = list_models()
+            except Exception as e:
+                error(f"Could not connect to Ollama: {e}")
+                sys.exit(1)
 
-        select_model(model_choice)
-        success(f"Using model: {model_choice}")
+            if not models:
+                error("No models found on Ollama. Pull a model first (e.g. 'ollama pull llama3.2:3b').")
+                sys.exit(1)
+
+            info("\n========== OLLAMA MODELS =========", False)
+            for idx, model_name in enumerate(models):
+                print(colored(f" {idx + 1}. {model_name}", "cyan"))
+            info("==================================\n", False)
+
+            model_choice = None
+            while model_choice is None:
+                raw = input(colored("Select a model: ", "magenta")).strip()
+                try:
+                    choice_idx = int(raw) - 1
+                    if 0 <= choice_idx < len(models):
+                        model_choice = models[choice_idx]
+                    else:
+                        warning("Invalid selection. Try again.")
+                except ValueError:
+                    warning("Please enter a number.")
+
+            select_model(model_choice)
+            success(f"Using model: {model_choice}")
 
     while True:
         main()

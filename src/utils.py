@@ -1,8 +1,10 @@
 import os
 import random
+import shutil
 import zipfile
 import requests
 import platform
+from datetime import datetime
 
 from status import *
 from config import *
@@ -47,19 +49,35 @@ def build_url(youtube_video_id: str) -> str:
 
 def rem_temp_files() -> None:
     """
-    Removes temporary files in the `.mp` directory.
+    Archives temporary files in the `.mp` directory.
 
     Returns:
         None
     """
-    # Path to the `.mp` directory
     mp_dir = os.path.join(ROOT_DIR, ".mp")
+    archive_root = os.path.join(mp_dir, "archive")
 
-    files = os.listdir(mp_dir)
+    entries_to_archive = []
+    for name in os.listdir(mp_dir):
+        path = os.path.join(mp_dir, name)
+        if name == "archive":
+            continue
+        if name.endswith(".json"):
+            continue
+        entries_to_archive.append(path)
 
-    for file in files:
-        if not file.endswith(".json"):
-            os.remove(os.path.join(mp_dir, file))
+    if not entries_to_archive:
+        return
+
+    os.makedirs(archive_root, exist_ok=True)
+    archive_dir = os.path.join(archive_root, datetime.now().strftime("%Y%m%d-%H%M%S"))
+    os.makedirs(archive_dir, exist_ok=True)
+
+    for path in entries_to_archive:
+        shutil.move(path, os.path.join(archive_dir, os.path.basename(path)))
+
+    if get_verbose():
+        info(f" => Archived {len(entries_to_archive)} artifact(s) to {archive_dir}")
 
 
 def fetch_songs() -> None:
@@ -90,6 +108,12 @@ def fetch_songs() -> None:
         configured_url = get_zip_url().strip()
         download_urls = [configured_url] if configured_url else []
         download_urls.extend(DEFAULT_SONG_ARCHIVE_URLS)
+
+        if not download_urls:
+            warning(
+                "No songs archive URL configured. Set zip_url in config.json or add audio files to Songs/ manually."
+            )
+            return
 
         archive_path = os.path.join(files_dir, "songs.zip")
         downloaded = False
